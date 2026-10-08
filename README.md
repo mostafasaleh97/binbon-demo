@@ -63,7 +63,19 @@ The list is also available at `GET /api`.
 | `COOKIE_SECURE`     | `true` behind an HTTPS ALB listener (default `false`)     |
 | `MAX_UPLOAD_MB`     | max size per photo (default `10`)                          |
 
-## Build & push to ECR
+## Deploying to AWS: the big picture
+
+The infrastructure (VPC, ALB, ECS, ElastiCache, S3, Secrets Manager, IAM, including the
+GitHub Actions role) lives in the sibling repo **`binbon-infra`**. Its README explains every
+Terraform block and how to build the same thing in the AWS console.
+
+The order is always:
+
+1. **Create the infrastructure and push a first image** (bootstrap), using `./deploy.sh up` in
+   `binbon-infra`, or by hand in the console. The ECS service needs *some* image to start with.
+2. **From then on, every push to `main` deploys automatically** through GitHub Actions (next section).
+
+Building and pushing the bootstrap image by hand:
 
 ```bash
 ACCOUNT=007924090369
@@ -75,13 +87,113 @@ TAG=v1
 aws ecr get-login-password --region $REGION \
   | docker login --username AWS --password-stdin $ACCOUNT.dkr.ecr.$REGION.amazonaws.com
 
-# 2. build (create the repo first, in console or Terraform)
-docker build -t $REPO:$TAG .
+# 2. build for the CPU the Fargate task uses (X86_64), even on an ARM laptop
+docker build --platform linux/amd64 -t $ACCOUNT.dkr.ecr.$REGION.amazonaws.com/$REPO:$TAG .
 
-# 3. tag + push
-docker tag $REPO:$TAG $ACCOUNT.dkr.ecr.$REGION.amazonaws.com/$REPO:$TAG
+# 3. push (the ECR repo must already exist)
 docker push $ACCOUNT.dkr.ecr.$REGION.amazonaws.com/$REPO:$TAG
 ```
+
+## CI/CD pipeline (GitHub Actions)
+
+The pipeline is one file: [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml).
+GitHub reads it and runs it on its own machines whenever its trigger happens.
+
+### Basic terms
+
+| Term | Meaning |
+|---|---|
+| **Workflow** | The whole YAML file: an automated process |
+| **Trigger** (`on:`) | What starts it: here a push to `main`, or the manual **Run workflow** button (`workflow_dispatch`) |
+| **Job** | A group of steps that runs on one machine. We have one job: `deploy` |
+| **Runner** | The machine running the job. `runs-on: ubuntu-latest` = a fresh GitHub-hosted Ubuntu VM per run, deleted afterwards. **Free for public repos** (2,000 min/month for private); a run takes about 3–4 min |
+| **Step** | One command (`run:`) or one reusable **action** (`uses:`) |
+| **Action** | A ready-made step published by someone, e.g. `aws-actions/configure-aws-credentials` |
+
+### The file, section by section
+
+```yaml
+on:
+  push:
+    branches: [main]      # every push/merge to main deploys
+  workflow_dispatch:      # adds a "Run workflow" button in the Actions tab
+```
+
+```yaml
+permissions:
+  id-token: write         # lets the job request a signed OIDC token from GitHub (to log in to AWS)
+  contents: read          # lets the job read (check out) the code; nothing more
+```
+The job's built-in `GITHUB_TOKEN` gets only these permissions (least privilege).
+
+```yaml
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+```
+Two quick pushes never deploy at the same time. The second run waits for the first one to finish.
+
+```yaml
+env:
+  AWS_REGION: eu-north-1
+  AWS_ROLE_ARN: arn:aws:iam::007924090369:role/binbon-dev-github-actions
+  ECR_REPOSITORY: binbon/demo
+  ECS_CLUSTER: binbon-dev-cluster
+  ECS_SERVICE: binbon-dev-demo
+  TASK_FAMILY: binbon-dev-demo
+  CONTAINER_NAME: demo
+```
+The names of the AWS resources created by `binbon-infra`. If you rename anything there, change it here.
+None of these values are secret, so no GitHub Secrets are needed at all.
+
+### The steps
+
+| # | Step | What it does | Why |
+|---|---|---|---|
+| 1 | `actions/checkout@v4` | Copies the repo onto the runner | The Docker build needs the code |
+| 2 | **Configure AWS credentials (OIDC)**: `aws-actions/configure-aws-credentials@v4` | Gets a signed token from GitHub saying *"repo binbon-demo, branch main"*, sends it to AWS STS, and receives **temporary credentials (about 1 hour)** for `binbon-dev-github-actions` | **No AWS access keys stored in GitHub.** AWS accepts the token only if it matches the role's trust policy (this repo, this branch) |
+| 3 | **Log in to ECR**: `aws-actions/amazon-ecr-login@v2` | Runs `docker login` against the account's ECR registry and outputs the registry URL | Needed before `docker push` |
+| 4 | **Build and push image** | `docker build --platform linux/amd64` and `docker push`, tagged **`<registry>/binbon/demo:<commit SHA>`** | A unique tag per commit: you always know exactly which code is running, and you can roll back to any earlier one |
+| 5 | **Fetch current task definition** | `aws ecs describe-task-definition` → `task-definition.json` | Starts from the **live** definition, so the env vars, roles, CPU/memory and logging set by Terraform are kept |
+| 6 | **Set new image**: `aws-actions/amazon-ecs-render-task-definition@v1` | Replaces only the `image` of container `demo` in that JSON | Changes nothing except the image |
+| 7 | **Deploy**: `aws-actions/amazon-ecs-deploy-task-definition@v2` | Registers the JSON as a **new revision** (`binbon-dev-demo:N+1`), points the service at it, and with `wait-for-service-stability: true` **waits** until the new task is running and **healthy behind the ALB** | ECS does a rolling update: the old task keeps serving until the new one passes `/health`. If the new task never becomes healthy, the run fails (red) and ECS keeps the old version running |
+
+### What the pipeline is allowed to do in AWS
+
+Only what the role `binbon-dev-github-actions` allows (defined in `binbon-infra/github.tf`):
+push to **this** ECR repository, register task definitions, update **this one** ECS service,
+and pass **only** the two ECS roles. It cannot read S3, the DB secret, or anything else.
+
+### Setting it up from scratch
+
+1. AWS side: create the OIDC provider and the role (Terraform `github.tf`, or console steps in
+   `binbon-infra/README.md`, section 6.13). The trust policy's `sub` must be
+   `repo:<owner>@<owner_id>/<repo>@<repo_id>:ref:refs/heads/main`. Get the IDs with
+   `curl -s https://api.github.com/repos/<owner>/<repo>` (`owner.id` and `id`).
+2. GitHub side: nothing to configure. Actions is enabled by default; committing the workflow file is enough.
+3. Pushing a workflow file needs a token with **Contents** *and* **Workflows: Read and write**.
+
+### Daily use
+
+- **Deploy:** `git push origin main`, then watch **Actions → Build and deploy**.
+- **Re-deploy without code changes:** Actions → Build and deploy → **Run workflow**.
+- **See what's running:** ECS → `binbon-dev-cluster` → `binbon-dev-demo` → task definition, whose image tag is the commit SHA.
+- **Roll back** to an earlier revision (image):
+  ```bash
+  aws ecs update-service --cluster binbon-dev-cluster --service binbon-dev-demo \
+    --task-definition binbon-dev-demo:<older-revision>
+  ```
+  Or in the console: service → **Update** → choose the older revision.
+
+### Troubleshooting
+
+| Failed step | Likely cause |
+|---|---|
+| Configure AWS credentials: `Not authorized to perform sts:AssumeRoleWithWebIdentity` | The trust policy doesn't match the token, or the infra is destroyed. CloudTrail → `AssumeRoleWithWebIdentity` shows the exact `sub` GitHub sent |
+| Build and push: `denied` / `not authorized` | The role's ECR permissions, or the repo name in `env:` is wrong |
+| Fetch task definition: `Unable to describe task definition` | The infra isn't deployed (`./deploy.sh up` first) |
+| Deploy: `AccessDeniedException ... iam:PassRole` | The role may not pass the ECS roles (`PassEcsRoles` statement) |
+| Deploy: times out waiting for stability | The new task isn't healthy. Check **CloudWatch → `/ecs/binbon-demo`** and the service's **Events** tab. ECS keeps the old version serving |
 
 ## IAM the ECS roles need
 
