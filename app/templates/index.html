@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Binbon · Your photos, safely in the cloud{% endblock %}
+{% block content %}
+<section class="hero container">
+  <h1>Keep every moment<br><span class="grad">safe in the cloud.</span></h1>
+  <p>Binbon is a simple, private home for your photos. Upload from any device, see them all in one place, and never worry about losing a memory again.</p>
+  <div class="cta">
+    {% if user %}
+      <a class="btn btn-primary btn-lg" href="/dashboard">Go to my photos</a>
+    {% else %}
+      <a class="btn btn-primary btn-lg" href="/signup">Create a free account</a>
+      <a class="btn btn-ghost btn-lg" href="/login">I already have one</a>
+    {% endif %}
+  </div>
+  {% if total_uploads %}
+    <div class="stat">📸 {{ "{:,}".format(total_uploads) }} photos uploaded so far</div>
+  {% endif %}
+</section>
+
+<section class="container features">
+  <div class="card feature">
+    <div class="icon">☁️</div>
+    <h3>Stored on Amazon S3</h3>
+    <p>Your files are kept in durable, encrypted object storage, never on the web server.</p>
+  </div>
+  <div class="card feature">
+    <div class="icon">🔒</div>
+    <h3>Private by default</h3>
+    <p>Only you can see your photos. The bucket is never exposed to the internet.</p>
+  </div>
+  <div class="card feature">
+    <div class="icon">⚡</div>
+    <h3>Fast everywhere</h3>
+    <p>Sessions are cached in Redis, so the app stays snappy as it scales out.</p>
+  </div>
+  <div class="card feature">
+    <div class="icon">🖼️</div>
+    <h3>Drag, drop, done</h3>
+    <p>Upload up to 10 JPEG, PNG, GIF or WebP photos at once, with an optional caption.</p>
+  </div>
+</section>
+{% endblock %}

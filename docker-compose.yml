@@ -1,0 +1,121 @@
+# Local test stack for Binbon.
+# Brings up the app together with Postgres, Redis, and LocalStack (S3 + Secrets
+# Manager) so EVERY feature can be exercised locally before touching real AWS.
+#
+# There are NO passwords in this file:
+#   - localstack-init generates a random DB password on first run, stores it in
+#     (LocalStack) Secrets Manager as "binbon/db", and writes it to the shared
+#     `db-secret` volume.
+#   - postgres reads it from that volume via POSTGRES_PASSWORD_FILE.
+#   - the app only gets DB_SECRET_ARN and fetches the credentials at runtime,
+#     exactly like it does against Aurora's managed secret in AWS.
+#
+#   docker compose up --build      # then open http://localhost:8000
+#   docker compose down            # stop (DB data + password are kept)
+#   docker compose down -v         # stop and wipe everything (new password next time)
+
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      AWS_REGION: eu-north-1
+      # dummy creds so boto3 is satisfied; LocalStack ignores their values.
+      # In ECS these are absent and the task role is used instead.
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      # point all boto3 calls at LocalStack (leave this UNSET in real AWS/Fargate)
+      AWS_ENDPOINT_URL: http://localstack:4566
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: binbon
+      DB_SECRET_ARN: binbon/db          # username + password live here
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_TLS: "false"
+      S3_BUCKET: binbon-demo
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      localstack-init:
+        condition: service_completed_successfully
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: binbon
+      POSTGRES_PASSWORD_FILE: /run/db-secret/password   # a path, not a password
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - db-secret:/run/db-secret:ro
+    depends_on:
+      localstack-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d binbon"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  localstack:
+    image: localstack/localstack:latest
+    ports:
+      - "127.0.0.1:4566:4566"            # main gateway (all AWS APIs + web UI)
+      - "127.0.0.1:4510-4559:4510-4559"
+    environment:
+      LOCALSTACK_AUTH_TOKEN: ${LOCALSTACK_AUTH_TOKEN}   # from .env (git-ignored)
+      SERVICES: s3,secretsmanager
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:4566/_localstack/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # One-shot job: create the bucket and the DB secret inside LocalStack, then exit.
+  # The password is generated once and kept in the db-secret volume, so it keeps
+  # matching the existing Postgres data even though LocalStack itself is ephemeral.
+  localstack-init:
+    image: amazon/aws-cli:latest
+    depends_on:
+      localstack:
+        condition: service_healthy
+    environment:
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_DEFAULT_REGION: eu-north-1
+    volumes:
+      - db-secret:/run/db-secret
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        aws="aws --endpoint-url=http://localstack:4566"
+        f=/run/db-secret/password
+
+        if [ ! -s "$$f" ]; then
+          head -c 24 /dev/urandom | base64 | tr -d '+/=\n' > "$$f"
+          echo "generated a new random database password"
+        fi
+        chmod 0644 "$$f"   # readable by the postgres user (uid 999) in its container
+
+        secret=$$(printf '{"username":"postgres","password":"%s"}' "$$(cat $$f)")
+        $$aws secretsmanager create-secret --name binbon/db --secret-string "$$secret" >/dev/null 2>&1 \
+          || $$aws secretsmanager put-secret-value --secret-id binbon/db --secret-string "$$secret" >/dev/null
+
+        $$aws s3 mb s3://binbon-demo 2>/dev/null || true
+        echo "localstack seeded (bucket + binbon/db secret ready)."
+
+volumes:
+  pgdata:
+  db-secret:

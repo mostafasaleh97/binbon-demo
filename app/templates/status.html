@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}System status · Binbon{% endblock %}
+{% block content %}
+<div class="container">
+  <div class="page-head">
+    <div>
+      <h1>System status</h1>
+      <p>Live checks against every backing service, run on each page load.</p>
+    </div>
+    <a class="btn btn-ghost" href="/status">Re-run checks</a>
+  </div>
+
+  <div class="status-banner">
+    {% if all_ok %}
+      <span class="dot ok"></span> All systems operational
+    {% else %}
+      <span class="dot bad"></span> Some services are having problems
+    {% endif %}
+  </div>
+
+  <div class="status-list">
+    {% for c in checks %}
+    <div class="card check">
+      <span class="dot {{ 'ok' if c.ok else 'bad' }}"></span>
+      <div class="info">
+        <div class="name">{{ c.name }}</div>
+        <div class="target">{{ c.target }}</div>
+        <div class="detail {{ '' if c.ok else 'bad' }}">{{ c.detail }}</div>
+      </div>
+      <div class="ms">{{ c.ms }} ms</div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

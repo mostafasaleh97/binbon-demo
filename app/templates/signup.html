@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Sign up · Binbon{% endblock %}
+{% block content %}
+<div class="auth-wrap">
+  <div class="card auth-card">
+    <img class="logo" src="/static/logo.svg" alt="Binbon">
+    <h1>Create your account</h1>
+    <p class="sub">Start uploading your photos in seconds.</p>
+
+    {% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+
+    <form method="post" action="/signup" novalidate>
+      <div class="field">
+        <label for="name">Full name</label>
+        <input id="name" name="name" type="text" value="{{ form.name or '' }}" autocomplete="name" required autofocus>
+      </div>
+      <div class="field">
+        <label for="email">Email</label>
+        <input id="email" name="email" type="email" value="{{ form.email or '' }}" autocomplete="email" required>
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="new-password" minlength="8" required>
+        <div class="hint">At least 8 characters.</div>
+      </div>
+      <div class="field">
+        <label for="confirm_password">Confirm password</label>
+        <input id="confirm_password" name="confirm_password" type="password" autocomplete="new-password" required>
+      </div>
+      <button class="btn btn-primary btn-block btn-lg" type="submit">Sign up</button>
+    </form>
+    <p class="switch">Already have an account? <a href="/login">Log in</a></p>
+  </div>
+</div>
+{% endblock %}

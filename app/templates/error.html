@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Something went wrong · Binbon{% endblock %}
+{% block content %}
+<div class="auth-wrap">
+  <div class="card auth-card">
+    <img class="logo" src="/static/logo.svg" alt="Binbon">
+    <h1>Something went wrong</h1>
+    <p class="sub">We couldn't complete your request. Check the <a href="/status">status page</a> to see which service is failing.</p>
+    <div class="alert alert-error">{{ error }}</div>
+    <a class="btn btn-ghost btn-block" href="/">Back to home</a>
+  </div>
+</div>
+{% endblock %}

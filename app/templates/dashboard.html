@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}My photos · Binbon{% endblock %}
+{% block content %}
+<div class="container">
+  <div class="page-head">
+    <div>
+      <h1>Hi, {{ user.name.split(' ')[0] }} 👋</h1>
+      <p>{{ photos|length }} photo{{ '' if photos|length == 1 else 's' }} · {{ total_size|human_size }} stored</p>
+    </div>
+  </div>
+
+  {% if welcome %}<div class="alert alert-ok">Your account is ready. Upload your first photo below!</div>{% endif %}
+  {% if uploaded %}<div class="alert alert-ok">{{ uploaded }} photo{{ '' if uploaded == 1 else 's' }} uploaded successfully.</div>{% endif %}
+  {% if deleted %}<div class="alert alert-ok">Photo deleted.</div>{% endif %}
+  {% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+
+  <div class="card upload-card">
+    <h2>Upload photos</h2>
+    <form method="post" action="/photos" enctype="multipart/form-data" id="upload-form">
+      <label class="dropzone" id="dropzone">
+        <div class="big">📤</div>
+        <div><strong>Click to choose</strong> or drag photos here</div>
+        <div class="hint">JPEG, PNG, GIF or WebP · up to {{ max_mb }} MB each · max 10 at once</div>
+        <input type="file" name="photos" id="photos" accept="image/jpeg,image/png,image/gif,image/webp" multiple required>
+      </label>
+      <div class="previews" id="previews"></div>
+      <div class="upload-row">
+        <input type="text" name="caption" maxlength="300" placeholder="Add a caption (optional)">
+        <button class="btn btn-primary" type="submit" id="upload-btn">Upload</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="gallery-head">
+    <h2>Your gallery</h2>
+    {% if photos %}<span>Newest first</span>{% endif %}
+  </div>
+
+  {% if photos %}
+  <div class="gallery">
+    {% for p in photos %}
+    <div class="photo">
+      <a class="thumb" href="/photos/{{ p.id }}" target="_blank" rel="noopener">
+        <img src="/photos/{{ p.id }}" alt="{{ p.caption or p.filename }}" loading="lazy">
+      </a>
+      <div class="meta">
+        {% if p.caption %}<div class="caption">{{ p.caption }}</div>{% endif %}
+        <div class="fname" title="{{ p.filename }}">{{ p.filename }}</div>
+        <div class="row">
+          <span>{{ p.created_at.strftime('%b %d, %Y · %H:%M') }} · {{ p.size|human_size }}</span>
+          <form method="post" action="/photos/{{ p.id }}/delete" onsubmit="return confirm('Delete this photo?');">
+            <button class="btn btn-danger" type="submit">Delete</button>
+          </form>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="card empty">
+    <div class="big">🖼️</div>
+    <p>No photos yet. Your uploads will appear here.</p>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const input = document.getElementById('photos');
+  const zone = document.getElementById('dropzone');
+  const previews = document.getElementById('previews');
+
+  function showPreviews() {
+    previews.innerHTML = '';
+    for (const file of input.files) {
+      const img = document.createElement('img');
+      img.src = URL.createObjectURL(file);
+      img.title = file.name;
+      previews.appendChild(img);
+    }
+  }
+  input.addEventListener('change', showPreviews);
+
+  ['dragenter', 'dragover'].forEach(ev => zone.addEventListener(ev, e => { e.preventDefault(); zone.classList.add('drag'); }));
+  ['dragleave', 'drop'].forEach(ev => zone.addEventListener(ev, e => { e.preventDefault(); zone.classList.remove('drag'); }));
+  zone.addEventListener('drop', e => { input.files = e.dataTransfer.files; showPreviews(); });
+
+  document.getElementById('upload-form').addEventListener('submit', () => {
+    const btn = document.getElementById('upload-btn');
+    btn.disabled = true;
+    btn.textContent = 'Uploading…';
+  });
+</script>
+{% endblock %}

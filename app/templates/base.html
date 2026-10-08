@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Binbon{% endblock %}</title>
+  <link rel="icon" href="/static/logo.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <a class="brand" href="/"><img src="/static/logo.svg" alt="">Binbon</a>
+      <nav class="nav">
+        {% if user %}
+          <a class="link" href="/dashboard">My photos</a>
+          <a class="link" href="/status">Status</a>
+          <span class="who">{{ user.name }}</span>
+          <form method="post" action="/logout"><button class="btn btn-ghost" type="submit">Log out</button></form>
+        {% else %}
+          <a class="link" href="/status">Status</a>
+          <a class="link" href="/login">Log in</a>
+          <a class="btn btn-primary" href="/signup">Sign up</a>
+        {% endif %}
+      </nav>
+    </div>
+  </header>
+
+  <main>{% block content %}{% endblock %}</main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <span>&copy; 2026 Binbon &middot; Your photos, safely in the cloud.</span>
+      <span><a href="/status">System status</a> &middot; <a href="/api">API</a></span>
+    </div>
+  </footer>
+  {% block scripts %}{% endblock %}
+</body>
+</html>
