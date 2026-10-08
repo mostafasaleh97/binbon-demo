@@ -42,6 +42,8 @@ Data placement: photo bytes live in S3 at `photos/<user_id>/<photo_id>.<ext>`. M
 
 ## AWS deployment notes
 
+- CI/CD: `.github/workflows/deploy.yml` runs on every push to `main`. It builds the image, pushes it to ECR tagged with the commit SHA, copies the live ECS task definition with the new image, and waits for the service to become stable. AWS access goes through OIDC, assuming `binbon-dev-github-actions`, which is defined in `../binbon-infra/github.tf` (no keys in GitHub). Terraform ignores the service's `task_definition`, so env-var changes made in Terraform only roll out with the next workflow deploy.
+
 - Task role: `s3:GetObject/PutObject/DeleteObject/ListBucket` on the bucket, plus `secretsmanager:GetSecretValue` on `DB_SECRET_ARN` (and `kms:Decrypt` if the secret uses a CMK).
 - Set `COOKIE_SECURE=true` behind an HTTPS listener.
 - The README has the ECR build/push commands (account `007924090369`, region `eu-north-1`, repo `binbon/demo`) and the full env-var table.
